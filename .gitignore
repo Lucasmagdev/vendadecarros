@@ -23,7 +23,7 @@ dist-ssr
 .env
 .bolt
 .playwright-mcp
-data
+/data
 server/db.json
 server/consumed-messages.json
 server/outbound-idempotency.json
