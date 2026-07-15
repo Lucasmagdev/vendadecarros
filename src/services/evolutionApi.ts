@@ -101,13 +101,17 @@ export async function sendWhatsAppMedia(input: SendMediaInput): Promise<Evolutio
   return data;
 }
 
-export async function acknowledgeInboundMessage(id: string): Promise<void> {
+export async function acknowledgeInboundMessages(ids: string[]): Promise<void> {
   const response = await fetch('/api/evolution/ack-message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ ids }),
   });
   if (!response.ok) throw new Error('Falha ao confirmar mensagem recebida');
+}
+
+export function acknowledgeInboundMessage(id: string): Promise<void> {
+  return acknowledgeInboundMessages([id]);
 }
 
 export async function getEvolutionStatus(): Promise<EvolutionStatusResult> {

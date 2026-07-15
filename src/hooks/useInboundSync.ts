@@ -2,13 +2,13 @@ import { useEffect, useRef } from 'react';
 import { ActivityEvent, Lead, WhatsAppMessage } from '../types';
 import { generateAutoReply } from '../services/ai';
 import {
-  acknowledgeInboundMessage,
+  acknowledgeInboundMessages,
   sendWhatsAppMedia,
   sendWhatsAppText,
 } from '../services/evolutionApi';
 import { asksForPhoto, matchInventoryVehicle } from '../services/inventoryMatch';
 
-const POLL_MS = 12_000;
+const POLL_MS = 4_000;
 
 // Compartilhado entre instâncias do hook (React StrictMode monta em dobro):
 // garante que cada mensagem recebida seja processada uma única vez.
@@ -16,7 +16,7 @@ const processedIds = new Set<string>();
 const inboundBusy = { current: false };
 
 const AUTO_REPLY_INSTRUCTION =
-  'Responda a última mensagem do cliente de forma útil e objetiva. Se ele pediu detalhes/ficha do carro, use os dados oficiais da ficha (ano, km, preço, destaques). Ofereça agendar uma visita quando fizer sentido. Se o cliente confirmar dia e horário, confirme o agendamento na resposta. Se faltar informação, diga que vai confirmar com a equipe.';
+  'Leia as últimas mensagens como uma conversa contínua e responda ao conjunto mais recente em uma única mensagem. Não repita saudação nem apresentação. Se forem frases fragmentadas, junte o sentido antes de responder. Se a conversa for casual ou fora do assunto, responda em no máximo uma frase e redirecione com leveza para a busca do carro, sem insistir. Se ele pediu detalhes, use a ficha oficial. Ofereça visita somente quando houver interesse real. Se confirmar dia e horário, confirme o agendamento. Nunca invente informação.';
 
 interface InboundRecord {
   id: string;
@@ -108,15 +108,25 @@ export function useInboundSync(
         );
         if (inbound.length === 0) return;
 
-        for (const record of inbound) {
-          const current = leadsRef.current;
-          const existing = findLeadByJid(current, record.remoteJid);
-          const alreadyKnown =
-            processedIds.has(record.id) ||
-            existing?.messages.some((message) => message.id === `auto-reply-${record.id}`);
-          if (alreadyKnown) continue;
+        const groups = new Map<string, InboundRecord[]>();
+        for (const record of inbound.sort((a, b) => a.timestamp - b.timestamp)) {
+          const key = record.remoteJid.split('@')[0];
+          groups.set(key, [...(groups.get(key) || []), record]);
+        }
 
-          const message: WhatsAppMessage = {
+        for (const records of groups.values()) {
+          const current = leadsRef.current;
+          const firstRecord = records[0];
+          const lastRecord = records[records.length - 1];
+          const existing = findLeadByJid(current, firstRecord.remoteJid);
+          const pending = records.filter(
+            (record) =>
+              !processedIds.has(record.id) &&
+              !existing?.messages.some((message) => message.id === `auto-reply-${record.id}`)
+          );
+          if (pending.length === 0) continue;
+
+          const inboundMessages: WhatsAppMessage[] = pending.map((record) => ({
             id: record.id,
             sender: 'lead',
             text: record.text,
@@ -126,23 +136,27 @@ export function useInboundSync(
                   minute: '2-digit',
                 })
               : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          };
+          }));
 
           let lead: Lead;
           if (existing) {
-            const hasInbound = existing.messages.some((item) => item.id === record.id);
+            const knownIds = new Set(existing.messages.map((message) => message.id));
             lead = {
               ...existing,
-              messages: hasInbound ? existing.messages : [...existing.messages, message],
+              messages: [...existing.messages, ...inboundMessages.filter((message) => !knownIds.has(message.id))],
               lastActivityAt: Date.now(),
             };
           } else {
-            lead = { ...createLeadFromInbound(record, message), lastActivityAt: Date.now() };
+            lead = {
+              ...createLeadFromInbound(firstRecord, inboundMessages[0]),
+              messages: inboundMessages,
+              lastActivityAt: Date.now(),
+            };
           }
 
-          // Cliente citou um carro? Casa com o estoque e qualifica o lead.
+          const combinedText = pending.map((record) => record.text).join('\n');
           const previousVehicle = lead.vehicle;
-          const cited = matchInventoryVehicle(record.text);
+          const cited = matchInventoryVehicle(combinedText);
           if (cited && lead.vehicle !== cited.model) {
             lead = {
               ...lead,
@@ -154,60 +168,56 @@ export function useInboundSync(
             };
           }
 
-          if (existing) {
+          if (lead.stage !== 'pre-atendimento') {
             setLeads((prev) => prev.map((item) => (item.id === lead.id ? lead : item)));
-          } else {
-            setLeads((prev) => [...prev, lead]);
+            leadsRef.current = current.map((item) => (item.id === lead.id ? lead : item));
+            pending.forEach((record) => processedIds.add(record.id));
+            await acknowledgeInboundMessages(pending.map((record) => record.id));
+            continue;
           }
-          leadsRef.current = leadsRef.current.some((item) => item.id === lead.id)
-            ? leadsRef.current.map((item) => (item.id === lead.id ? lead : item))
-            : [...leadsRef.current, lead];
-
-          // IA responde sozinha apenas leads em pré-atendimento.
-          if (lead.stage !== 'pre-atendimento') continue;
 
           const generated = existing
             ? await generateAutoReply(
                 AUTO_REPLY_INSTRUCTION,
                 lead,
-                `Oi ${lead.clientName.split(' ')[0]}! Recebi sua mensagem e já te ajudo com os detalhes.`
+                'Entendi. Me conta qual carro você procura e eu te ajudo por aqui.'
               )
             : { ok: true as const, mode: 'demo' as const, text: buildWelcomeMessage(lead), scheduledAt: null };
           const scheduledAt = generated.scheduledAt || null;
-          // Envia a foto ao identificar o modelo pela primeira vez ou quando o cliente pedir.
           const stock = matchInventoryVehicle(lead.vehicle);
           const identifiedNow = Boolean(cited) && previousVehicle !== cited?.model;
           const photoAlreadySent = Boolean(stock) && lead.messages.some(
             (item) => item.attachment?.type === 'image' && item.attachment.label.includes(stock!.model)
           );
-          const sendPhoto = Boolean(stock) && (asksForPhoto(record.text) || (identifiedNow && !photoAlreadySent));
-
-          const idempotencyKey = `inbound-reply:${record.id}`;
-          const sendResult = sendPhoto && stock
-            ? await sendWhatsAppMedia({
-              number: digitsOf(lead.phone),
-              media: stock.image,
-              caption: generated.text,
-              mediatype: 'image',
-              mimetype: 'image/jpeg',
-              fileName: `${stock.id}-veiculo.jpg`,
-              idempotencyKey,
-            })
-            : await sendWhatsAppText({
-              number: digitsOf(lead.phone),
-              text: generated.text,
-              idempotencyKey,
-            });
+          const sendPhoto =
+            Boolean(stock) && (asksForPhoto(combinedText) || (identifiedNow && !photoAlreadySent));
+          const idempotencyKey = `inbound-reply:${firstRecord.id}:${lastRecord.id}:${pending.length}`;
+          const sendResult =
+            sendPhoto && stock
+              ? await sendWhatsAppMedia({
+                  number: digitsOf(lead.phone),
+                  media: stock.image,
+                  caption: generated.text,
+                  mediatype: 'image',
+                  mimetype: 'image/jpeg',
+                  fileName: `${stock.id}-veiculo.jpg`,
+                  idempotencyKey,
+                })
+              : await sendWhatsAppText({
+                  number: digitsOf(lead.phone),
+                  text: generated.text,
+                  idempotencyKey,
+                });
 
           if (!sendResult.ok) throw new Error(sendResult.error || 'Falha ao responder lead');
           if (sendResult.duplicate) {
-            processedIds.add(record.id);
-            await acknowledgeInboundMessage(record.id);
+            pending.forEach((record) => processedIds.add(record.id));
+            await acknowledgeInboundMessages(pending.map((record) => record.id));
             continue;
           }
 
           const reply: WhatsAppMessage = {
-            id: `auto-reply-${record.id}`,
+            id: `auto-reply-${lastRecord.id}`,
             sender: 'ai',
             text: generated.text,
             time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
@@ -216,42 +226,45 @@ export function useInboundSync(
               ? { attachment: { type: 'image' as const, label: `📷 Foto — ${stock.model}` } }
               : {}),
           };
-          setLeads((prev) =>
-            prev.map((item) => {
-              if (item.id !== lead.id) return item;
-              const updated: Lead = {
-                ...item,
-                messages: [...item.messages, reply],
-                lastActivityAt: Date.now(),
-              };
-              // Cliente confirmou visita → IA agenda e move o card sozinha.
-              if (scheduledAt) {
-                updated.stage = 'agendado';
-                updated.scheduledAt = scheduledAt;
-                updated.status = `Visita agendada pela IA para ${new Date(scheduledAt).toLocaleString('pt-BR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}`;
-                updated.nextAction = 'Confirmar visita 1 dia antes (automático)';
-                updated.aiActions = [...(item.aiActions || []), 'Agendou visita'];
-              }
-              return updated;
-            })
-          );
+          const updatedLead: Lead = {
+            ...lead,
+            messages: [...lead.messages, reply],
+            lastActivityAt: Date.now(),
+          };
+          if (scheduledAt) {
+            updatedLead.stage = 'agendado';
+            updatedLead.scheduledAt = scheduledAt;
+            updatedLead.status = `Visita agendada pela IA para ${new Date(scheduledAt).toLocaleString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}`;
+            updatedLead.nextAction = 'Confirmar visita 1 dia antes (automático)';
+            updatedLead.aiActions = [...(lead.aiActions || []), 'Agendou visita'];
+          }
+
+          setLeads((prev) => {
+            const exists = prev.some((item) => item.id === updatedLead.id);
+            return exists
+              ? prev.map((item) => (item.id === updatedLead.id ? updatedLead : item))
+              : [...prev, updatedLead];
+          });
+          leadsRef.current = current.some((item) => item.id === updatedLead.id)
+            ? current.map((item) => (item.id === updatedLead.id ? updatedLead : item))
+            : [...current, updatedLead];
 
           onActivity({
-            id: `inbound-${record.id}`,
+            id: `inbound-${lastRecord.id}`,
             at: Date.now(),
-            leadName: lead.clientName,
+            leadName: updatedLead.clientName,
             ruleName: scheduledAt ? 'Visita agendada pela IA' : 'Atendimento automático',
             mode: 'ia',
             withPhoto: sendPhoto,
             text: generated.text,
           });
-          processedIds.add(record.id);
-          await acknowledgeInboundMessage(record.id);
+          pending.forEach((record) => processedIds.add(record.id));
+          await acknowledgeInboundMessages(pending.map((record) => record.id));
         }
       } catch {
         // bridge fora do ar — tenta no próximo ciclo

@@ -21,6 +21,7 @@ const CONSUMED_PATH = path.join(DATA_DIR, 'consumed-messages.json');
 const OUTBOUND_PATH = path.join(DATA_DIR, 'outbound-idempotency.json');
 const DELETED_LEADS_PATH = path.join(DATA_DIR, 'deleted-leads.json');
 const MESSAGE_LEASE_MS = 60_000;
+const INBOUND_SETTLE_SECONDS = 5;
 
 // Ids de mensagens já entregues a um cliente do CRM — garante processamento único
 // mesmo com o app aberto em várias abas/navegadores.
@@ -553,7 +554,8 @@ async function handleFindMessages(req, res) {
         record.text &&
         !record.fromMe &&
         canClaimMessage(record.id) &&
-        record.timestamp >= BRIDGE_STARTED_AT
+        record.timestamp >= BRIDGE_STARTED_AT &&
+        record.timestamp <= Math.floor(Date.now() / 1000) - INBOUND_SETTLE_SECONDS
     );
 
   claimMessages(simplified.map((record) => record.id));
