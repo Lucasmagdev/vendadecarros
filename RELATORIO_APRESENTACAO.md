@@ -38,7 +38,7 @@ O AutoCRM IA demonstra como uma loja de seminovos pode receber, qualificar e aco
 
 ## Pontos importantes para a demonstração
 
-- Use um número de teste e mantenha o painel aberto.
+- Use um número de teste; o atendimento roda no servidor mesmo com o painel fechado.
 - A IA espera 10 segundos de silêncio após a última mensagem. Na prática, a resposta pode aparecer entre 10 e 14 segundos.
 - Mensagens enviadas em sequência são agrupadas e recebem uma única resposta contextual.
 - Para repetir o primeiro atendimento, exclua o lead no modal e envie uma nova mensagem.
@@ -46,7 +46,7 @@ O AutoCRM IA demonstra como uma loja de seminovos pode receber, qualificar e aco
 
 ## Próximas evoluções
 
-- Executar automações em worker no servidor, sem depender do painel aberto.
+- Evoluir o worker do servidor com filas persistentes, métricas e alertas operacionais.
 - Banco PostgreSQL e autenticação com usuários e permissões.
 - Importação automática de estoque por planilha, site ou DMS.
 - Agenda real por vendedor e relatórios de conversão.

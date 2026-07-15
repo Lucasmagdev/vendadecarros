@@ -572,7 +572,7 @@ async function handleFindMessages(req, res) {
         record.text &&
         !record.fromMe &&
         canClaimMessage(record.id) &&
-        record.timestamp >= BRIDGE_STARTED_AT - 15 * 60 &&
+        record.timestamp >= BRIDGE_STARTED_AT - 60 * 60 &&
         latestInboundByJid.get(record.remoteJid) <= quietBefore
     );
 
@@ -815,7 +815,7 @@ const workerInventory = [
     year: '2023/2024',
     price: 'R$ 82.900',
     mileage: '28.400 km',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chevrolet_Onix_Activ_2017_%2849170997611%29.jpg?width=900',
+    image: '/vehicles/onix.jpg',
     highlights: ['Automático', 'Único dono', 'IPVA pago'],
   },
   {
@@ -825,7 +825,7 @@ const workerInventory = [
     year: '2022/2023',
     price: 'R$ 71.500',
     mileage: '35.100 km',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Hyundai_HB20_06_2016_BSB_2593.jpg?width=900',
+    image: '/vehicles/hb20.jpg',
     highlights: ['Baixa entrada', 'Garantia de motor', 'Laudo cautelar'],
   },
   {
@@ -835,7 +835,7 @@ const workerInventory = [
     year: '2021/2022',
     price: 'R$ 64.900',
     mileage: '42.000 km',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Fiat_Argo_test_drive_car_in_Punta_del_Este_%28front%29.jpg?width=900',
+    image: '/vehicles/argo.jpg',
     highlights: ['Econômico', 'Manual', 'Financia fácil'],
   },
   {
@@ -845,7 +845,7 @@ const workerInventory = [
     year: '2024/2024',
     price: 'R$ 84.900',
     mileage: '12.800 km',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/2024_Volkswagen_Polo_Track_1.6_MSi_%28front%29.jpg?width=900',
+    image: '/vehicles/polo.jpg',
     highlights: ['Garantia de fábrica', 'Baixa km', 'Entrada facilitada'],
   },
   {
@@ -855,7 +855,7 @@ const workerInventory = [
     year: '2021/2021',
     price: 'R$ 92.000',
     mileage: '51.300 km',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Jeep_Renegade_%28MSP15%29.JPG?width=900',
+    image: '/vehicles/renegade.jpg',
     highlights: ['Automático', 'SUV'],
   },
 ];
@@ -970,7 +970,10 @@ async function processServerGroup(records) {
     body: JSON.stringify(body),
   });
   const sendResult = await sendResponse.json();
-  if (!sendResult.ok) throw new Error(sendResult.error || 'Falha no envio do worker');
+  if (!sendResult.ok) {
+    const evolutionError = sendResult.evolution?.response?.message || sendResult.evolution?.message;
+    throw new Error(sendResult.error || evolutionError || 'Falha no envio do worker');
+  }
 
   if (!sendResult.duplicate) {
     lead.messages.push({
@@ -1244,12 +1247,30 @@ async function prepareMedia(media, requestedMimetype, requestedFileName) {
       ? requestedFileName.trim()
       : 'veiculo.jpg';
 
+  if (media.startsWith('/')) {
+    const relativePath = media.replace(/^\/+/, '');
+    const filePath = path.resolve(DIST_PATH, relativePath);
+    if (!filePath.startsWith(DIST_PATH) || !fs.existsSync(filePath)) {
+      throw new Error(`Imagem local não encontrada: ${relativePath}`);
+    }
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length > 8_000_000) throw new Error('Imagem maior que 8 MB');
+    return {
+      media: buffer.toString('base64'),
+      mimetype: fallbackMimetype,
+      fileName: requestedFileName || path.basename(filePath),
+    };
+  }
+
   if (!/^https?:\/\//i.test(media)) {
     return { media, mimetype: fallbackMimetype, fileName: fallbackFileName };
   }
 
   try {
-    const response = await fetch(media, { redirect: 'follow' });
+    const response = await fetch(media, {
+      redirect: 'follow',
+      headers: { 'User-Agent': 'AutoCRM-IA/1.0' },
+    });
     if (!response.ok) throw new Error(`Imagem retornou ${response.status}`);
     const contentLength = Number(response.headers.get('content-length') || 0);
     if (contentLength > 8_000_000) throw new Error('Imagem maior que 8 MB');

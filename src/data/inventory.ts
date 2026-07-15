@@ -10,7 +10,7 @@ export const inventoryVehicles: InventoryVehicle[] = [
     status: 'disponivel',
     source: 'site',
     lastSync: '2026-07-14T10:20:00',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chevrolet_Onix_Activ_2017_%2849170997611%29.jpg?width=900',
+    image: '/vehicles/onix.jpg',
     highlights: ['Automático', 'Único dono', 'IPVA pago'],
   },
   {
@@ -22,7 +22,7 @@ export const inventoryVehicles: InventoryVehicle[] = [
     status: 'reservado',
     source: 'planilha',
     lastSync: '2026-07-14T09:55:00',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Hyundai_HB20_06_2016_BSB_2593.jpg?width=900',
+    image: '/vehicles/hb20.jpg',
     highlights: ['Baixa entrada', 'Garantia de motor', 'Laudo cautelar'],
   },
   {
@@ -34,7 +34,7 @@ export const inventoryVehicles: InventoryVehicle[] = [
     status: 'disponivel',
     source: 'dms',
     lastSync: '2026-07-14T10:02:00',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Fiat_Argo_test_drive_car_in_Punta_del_Este_%28front%29.jpg?width=900',
+    image: '/vehicles/argo.jpg',
     highlights: ['Econômico', 'Manual', 'Financia fácil'],
   },
   {
@@ -46,7 +46,7 @@ export const inventoryVehicles: InventoryVehicle[] = [
     status: 'revisao',
     source: 'manual',
     lastSync: '2026-07-14T08:40:00',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/2024_Volkswagen_Polo_Track_1.6_MSi_%28front%29.jpg?width=900',
+    image: '/vehicles/polo.jpg',
     highlights: ['Garantia de fábrica', 'Baixa km', 'Entrada facilitada'],
   },
   {
@@ -58,7 +58,7 @@ export const inventoryVehicles: InventoryVehicle[] = [
     status: 'vendido',
     source: 'site',
     lastSync: '2026-07-13T18:15:00',
-    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Jeep_Renegade_%28MSP15%29.JPG?width=900',
+    image: '/vehicles/renegade.jpg',
     highlights: ['Automático', 'SUV', 'Cliente convertido pela IA'],
   },
 ];
