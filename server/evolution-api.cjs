@@ -21,7 +21,7 @@ const CONSUMED_PATH = path.join(DATA_DIR, 'consumed-messages.json');
 const OUTBOUND_PATH = path.join(DATA_DIR, 'outbound-idempotency.json');
 const DELETED_LEADS_PATH = path.join(DATA_DIR, 'deleted-leads.json');
 const MESSAGE_LEASE_MS = 60_000;
-const INBOUND_SETTLE_SECONDS = 5;
+const INBOUND_SETTLE_SECONDS = 10;
 
 // Ids de mensagens já entregues a um cliente do CRM — garante processamento único
 // mesmo com o app aberto em várias abas/navegadores.
@@ -528,8 +528,7 @@ async function handleFindMessages(req, res) {
       ? data.messages.records
       : [];
 
-  const simplified = records
-    .map((record) => {
+  const candidates = records.map((record) => {
       const key = record.key || {};
       const message = record.message || {};
       const text =
@@ -546,8 +545,19 @@ async function handleFindMessages(req, res) {
         text,
         timestamp: Number(record.messageTimestamp) || 0,
       };
-    })
-    .filter(
+    });
+
+  const latestInboundByJid = new Map();
+  for (const record of candidates) {
+    if (!record.fromMe && record.remoteJid) {
+      latestInboundByJid.set(
+        record.remoteJid,
+        Math.max(latestInboundByJid.get(record.remoteJid) || 0, record.timestamp)
+      );
+    }
+  }
+  const quietBefore = Math.floor(Date.now() / 1000) - INBOUND_SETTLE_SECONDS;
+  const simplified = candidates.filter(
       (record) =>
         record.id &&
         record.remoteJid &&
@@ -555,7 +565,7 @@ async function handleFindMessages(req, res) {
         !record.fromMe &&
         canClaimMessage(record.id) &&
         record.timestamp >= BRIDGE_STARTED_AT &&
-        record.timestamp <= Math.floor(Date.now() / 1000) - INBOUND_SETTLE_SECONDS
+        latestInboundByJid.get(record.remoteJid) <= quietBefore
     );
 
   claimMessages(simplified.map((record) => record.id));
