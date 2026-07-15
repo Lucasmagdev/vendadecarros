@@ -1,3 +1,4 @@
+import { inventoryVehicles } from '../data/inventory';
 import { Lead } from '../types';
 import { buildVehicleSheet, matchInventoryVehicle } from './inventoryMatch';
 
@@ -28,6 +29,7 @@ async function callGenerate(
           clientName: lead.clientName,
           vehicle: lead.vehicle,
           vehicleSheet: stock ? buildVehicleSheet(stock) : undefined,
+          inventorySheet: inventoryVehicles.map(buildVehicleSheet).join(' | '),
           budgetRange: lead.budgetRange,
           intent: lead.intent,
           messages: lead.messages.slice(-6),

@@ -55,10 +55,10 @@ export const inventoryVehicles: InventoryVehicle[] = [
     year: '2021/2021',
     price: 'R$ 92.000',
     mileage: '51.300 km',
-    status: 'vendido',
+    status: 'disponivel',
     source: 'site',
     lastSync: '2026-07-13T18:15:00',
     image: '/vehicles/renegade.jpg',
-    highlights: ['Automático', 'SUV', 'Cliente convertido pela IA'],
+    highlights: ['Automático', 'SUV', 'Pronta entrega'],
   },
 ];

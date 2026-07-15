@@ -80,6 +80,18 @@ function buildWelcomeMessage(lead: Lead): string {
   return `Oi, ${firstName}! Sou a assistente virtual da loja. Como posso te ajudar? Você procura algum modelo ou faixa de preço específica?`;
 }
 
+function findRecentVehicle(messages: WhatsAppMessage[]) {
+  return [...messages]
+    .reverse()
+    .filter((message) => message.sender === 'lead')
+    .map((message) => matchInventoryVehicle(message.text))
+    .find(Boolean) || null;
+}
+
+function buildPhotoCaption(stock: NonNullable<ReturnType<typeof matchInventoryVehicle>>): string {
+  return `Aqui está o ${stock.model}, ano ${stock.year}, com ${stock.mileage}, por ${stock.price}. Destaques: ${stock.highlights.join(', ')}. Quer agendar uma visita para conhecer?`;
+}
+
 export function useInboundSync(
   leads: Lead[],
   setLeads: React.Dispatch<React.SetStateAction<Lead[]>>,
@@ -156,7 +168,10 @@ export function useInboundSync(
 
           const combinedText = pending.map((record) => record.text).join('\n');
           const previousVehicle = lead.vehicle;
-          const cited = matchInventoryVehicle(combinedText);
+          const cited =
+            matchInventoryVehicle(combinedText) ||
+            matchInventoryVehicle(lead.vehicle) ||
+            findRecentVehicle(lead.messages);
           if (cited && lead.vehicle !== cited.model) {
             lead = {
               ...lead,
@@ -176,14 +191,6 @@ export function useInboundSync(
             continue;
           }
 
-          const generated = existing
-            ? await generateAutoReply(
-                AUTO_REPLY_INSTRUCTION,
-                lead,
-                'Entendi. Me conta qual carro você procura e eu te ajudo por aqui.'
-              )
-            : { ok: true as const, mode: 'demo' as const, text: buildWelcomeMessage(lead), scheduledAt: null };
-          const scheduledAt = generated.scheduledAt || null;
           const stock = matchInventoryVehicle(lead.vehicle);
           const identifiedNow = Boolean(cited) && previousVehicle !== cited?.model;
           const photoAlreadySent = Boolean(stock) && lead.messages.some(
@@ -191,6 +198,16 @@ export function useInboundSync(
           );
           const sendPhoto =
             Boolean(stock) && (asksForPhoto(combinedText) || (identifiedNow && !photoAlreadySent));
+          const generated = sendPhoto && stock
+            ? { ok: true as const, mode: 'demo' as const, text: buildPhotoCaption(stock), scheduledAt: null }
+            : existing
+              ? await generateAutoReply(
+                  AUTO_REPLY_INSTRUCTION,
+                  lead,
+                  'Entendi. Me conta qual carro você procura e eu te ajudo por aqui.'
+                )
+              : { ok: true as const, mode: 'demo' as const, text: buildWelcomeMessage(lead), scheduledAt: null };
+          const scheduledAt = generated.scheduledAt || null;
           const idempotencyKey = `inbound-reply:${firstRecord.id}:${lastRecord.id}:${pending.length}`;
           const sendResult =
             sendPhoto && stock

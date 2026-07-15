@@ -2,12 +2,19 @@ import { inventoryVehicles } from '../data/inventory';
 import { InventoryVehicle, Lead } from '../types';
 
 const STOPWORDS = new Set(['de', 'do', 'da', 'e', 'o', 'a', '10', '16', '20']);
+const VEHICLE_ALIASES: Record<string, string[]> = {
+  'stk-1': ['onix', 'chevrolet'],
+  'stk-2': ['hb20', 'hyundai'],
+  'stk-3': ['argo', 'fiat'],
+  'stk-4': ['polo', 'volkswagen', 'vw'],
+  'stk-5': ['renegade', 'jeep', 'suv'],
+};
 
 function tokens(value: string): string[] {
   return value
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((token) => token.length >= 3 && !STOPWORDS.has(token));
@@ -24,7 +31,7 @@ export function matchInventoryVehicle(text: string): InventoryVehicle | null {
 
   let best: { vehicle: InventoryVehicle; score: number } | null = null;
   for (const vehicle of inventoryVehicles) {
-    const modelTokens = tokens(vehicle.model);
+    const modelTokens = [...tokens(vehicle.model), ...(VEHICLE_ALIASES[vehicle.id] || [])];
     const score = modelTokens.filter((token) => textTokens.has(token)).length;
     if (score > 0 && (!best || score > best.score)) {
       best = { vehicle, score };

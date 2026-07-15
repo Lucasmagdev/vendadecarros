@@ -627,7 +627,7 @@ async function handleAiGenerate(req, res) {
     detectSchedule
       ? 'Responda SOMENTE com JSON válido, sem markdown, no formato: {"reply": "mensagem curta e natural (máximo 3 frases)", "scheduledAt": "data/hora ISO 8601 COM fuso -03:00 (ex: 2026-07-16T15:00:00-03:00) se o cliente CONFIRMOU dia e horário de visita, senão null"}. O horário dito pelo cliente é no fuso de Brasília (-03:00). Só preencha scheduledAt quando o cliente confirmar explicitamente um horário — sugerir horário não conta.'
       : 'Escreva UMA única mensagem curta (máximo 2 frases), natural e humana, sem assinatura, sem markdown.',
-    'Nunca invente preço, condição ou dado que não esteja no contexto. Use a ficha do veículo quando o cliente pedir detalhes.',
+    'Nunca invente modelo, preço, condição ou dado que não esteja no contexto. Nunca ofereça um veículo fora da lista de estoque informada. Use a ficha oficial quando o cliente pedir detalhes.',
   ].join(' ');
 
   const now = new Date();
@@ -643,6 +643,7 @@ async function handleAiGenerate(req, res) {
     `Cliente: ${lead.clientName || 'desconhecido'}`,
     `Veículo de interesse: ${lead.vehicle || 'não informado'}`,
     lead.vehicleSheet ? `Ficha do veículo (dados oficiais da loja): ${lead.vehicleSheet}` : '',
+    lead.inventorySheet ? `Estoque que pode ser oferecido: ${lead.inventorySheet}` : '',
     `Faixa de orçamento: ${lead.budgetRange || 'não informada'}`,
     lead.intent ? `Intenção detectada: ${lead.intent}` : '',
     history ? `Últimas mensagens:\n${history}` : '',
@@ -810,7 +811,7 @@ function persistDeletedLeads() {
 const workerInventory = [
   {
     id: 'stk-1',
-    keywords: ['onix'],
+    keywords: ['onix', 'chevrolet'],
     model: 'Chevrolet Onix LTZ 1.0 Turbo',
     year: '2023/2024',
     price: 'R$ 82.900',
@@ -820,7 +821,7 @@ const workerInventory = [
   },
   {
     id: 'stk-2',
-    keywords: ['hb20'],
+    keywords: ['hb20', 'hyundai'],
     model: 'Hyundai HB20 Comfort Plus',
     year: '2022/2023',
     price: 'R$ 71.500',
@@ -830,7 +831,7 @@ const workerInventory = [
   },
   {
     id: 'stk-3',
-    keywords: ['argo'],
+    keywords: ['argo', 'fiat'],
     model: 'Fiat Argo Drive 1.0',
     year: '2021/2022',
     price: 'R$ 64.900',
@@ -840,7 +841,7 @@ const workerInventory = [
   },
   {
     id: 'stk-4',
-    keywords: ['polo'],
+    keywords: ['polo', 'volkswagen', 'vw'],
     model: 'Volkswagen Polo Track',
     year: '2024/2024',
     price: 'R$ 84.900',
@@ -850,7 +851,7 @@ const workerInventory = [
   },
   {
     id: 'stk-5',
-    keywords: ['renegade'],
+    keywords: ['renegade', 'jeep', 'suv'],
     model: 'Jeep Renegade Sport',
     year: '2021/2021',
     price: 'R$ 92.000',
@@ -924,7 +925,10 @@ async function processServerGroup(records) {
     : createServerLead(first, inboundMessages);
   const combinedText = records.map((record) => record.text).join('\n');
   const previousVehicle = lead.vehicle;
-  const stock = matchWorkerVehicle(combinedText) || matchWorkerVehicle(lead.vehicle);
+  const stock =
+    matchWorkerVehicle(combinedText) ||
+    matchWorkerVehicle(lead.vehicle) ||
+    findRecentWorkerVehicle(lead.messages);
   if (stock && lead.vehicle !== stock.model) {
     lead = {
       ...lead,
@@ -942,15 +946,17 @@ async function processServerGroup(records) {
     return;
   }
 
-  const generated = existing
-    ? await generateWorkerReply(lead)
-    : { text: buildServerWelcome(lead), scheduledAt: null };
   const matchedStock = matchWorkerVehicle(lead.vehicle);
   const photoAlreadySent = Boolean(matchedStock) && lead.messages.some(
     (message) => message.attachment && message.attachment.type === 'image' && message.attachment.label.includes(matchedStock.model)
   );
   const identifiedNow = Boolean(matchedStock) && previousVehicle !== matchedStock.model;
   const sendPhoto = Boolean(matchedStock) && (workerAsksForPhoto(combinedText) || (identifiedNow && !photoAlreadySent));
+  const generated = sendPhoto
+    ? { text: buildWorkerPhotoCaption(matchedStock), scheduledAt: null }
+    : existing
+      ? await generateWorkerReply(lead)
+      : { text: buildServerWelcome(lead), scheduledAt: null };
   const idempotencyKey = `server-inbound:${first.id}:${last.id}:${records.length}`;
   const endpoint = sendPhoto ? 'send-media' : 'send-text';
   const body = sendPhoto
@@ -1045,6 +1051,9 @@ async function generateWorkerReply(lead) {
         vehicleSheet: stock
           ? `Modelo: ${stock.model} | Ano: ${stock.year} | Preço: ${stock.price} | Km: ${stock.mileage} | Destaques: ${stock.highlights.join(', ')}`
           : undefined,
+        inventorySheet: workerInventory
+          .map((vehicle) => `${vehicle.model} (${vehicle.year}, ${vehicle.price}, ${vehicle.mileage})`)
+          .join(' | '),
         budgetRange: lead.budgetRange,
         intent: lead.intent,
         messages: lead.messages.slice(-8),
@@ -1092,6 +1101,18 @@ function internalHeaders(extra = {}) {
 function matchWorkerVehicle(text) {
   const normalized = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   return workerInventory.find((vehicle) => vehicle.keywords.some((keyword) => normalized.includes(keyword))) || null;
+}
+
+function findRecentWorkerVehicle(messages) {
+  return [...(Array.isArray(messages) ? messages : [])]
+    .reverse()
+    .filter((message) => message.sender === 'lead')
+    .map((message) => matchWorkerVehicle(message.text))
+    .find(Boolean) || null;
+}
+
+function buildWorkerPhotoCaption(stock) {
+  return `Aqui está o ${stock.model}, ano ${stock.year}, com ${stock.mileage}, por ${stock.price}. Destaques: ${stock.highlights.join(', ')}. Quer agendar uma visita para conhecer?`;
 }
 
 function workerAsksForPhoto(text) {
