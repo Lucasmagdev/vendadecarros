@@ -4,6 +4,15 @@
 
 O AutoCRM IA demonstra como uma loja de seminovos pode receber, qualificar e acompanhar leads do WhatsApp em um único painel. A proposta é reduzir o tempo gasto em perguntas repetitivas e entregar ao vendedor apenas os contatos que precisam de negociação humana.
 
+## Ambiente publicado
+
+- URL: `https://autocrm.129-212-189-135.sslip.io`
+- Repositório: `https://github.com/Lucasmagdev/vendadecarros`
+- Branch: `main`
+- Serviço: `autocrm.service`
+- Domínio servido por Caddy com HTTPS.
+- Aplicação isolada em `127.0.0.1:3100` na VPS.
+
 ## Fluxo para apresentar
 
 1. Abra o Pipeline e mostre as etapas: Pré-atendimento, Follow-up, Agendado, Humano e Vendido.
@@ -30,7 +39,8 @@ O AutoCRM IA demonstra como uma loja de seminovos pode receber, qualificar e aco
 ## Pontos importantes para a demonstração
 
 - Use um número de teste e mantenha o painel aberto.
-- Aguarde até 12 segundos após cada mensagem recebida.
+- A IA espera 10 segundos de silêncio após a última mensagem. Na prática, a resposta pode aparecer entre 10 e 14 segundos.
+- Mensagens enviadas em sequência são agrupadas e recebem uma única resposta contextual.
 - Para repetir o primeiro atendimento, exclua o lead no modal e envie uma nova mensagem.
 - Evite demonstrar com dados pessoais de clientes reais.
 
