@@ -21,6 +21,12 @@ const columns: { stage: KanbanStage; title: string; subtitle: string }[] = [
   { stage: 'venda-concluida', title: 'Vendido', subtitle: 'Fechado' },
 ];
 
+function leadsSignature(leads: Lead[]) {
+  return leads
+    .map((lead) => `${lead.id}:${lead.stage}:${lead.lastActivityAt || 0}:${lead.messages.length}`)
+    .join('|');
+}
+
 function App() {
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [rules, setRules] = useState<AutomationRule[]>(initialAutomationRules);
@@ -55,6 +61,20 @@ function App() {
     }
     saveStateDebounced(leads, rules);
   }, [leads, rules, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const sync = () => {
+      loadState().then((state) => {
+        if (!state) return;
+        setLeads((current) =>
+          leadsSignature(current) === leadsSignature(state.leads) ? current : state.leads
+        );
+      });
+    };
+    const interval = setInterval(sync, 5_000);
+    return () => clearInterval(interval);
+  }, [hydrated]);
 
   const pushActivity = useCallback((event: ActivityEvent) => {
     setEvents((prev) => [...prev.slice(-9), event]);

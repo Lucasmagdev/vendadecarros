@@ -14,6 +14,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const APP_USERNAME = process.env.APP_USERNAME || '';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
+const SERVER_WORKER_ENABLED = process.env.SERVER_WORKER_ENABLED === 'true';
+const WORKER_TOKEN = Math.random().toString(36).slice(2) + Date.now().toString(36);
 const DATA_DIR = path.resolve(process.env.DATA_DIR || __dirname);
 const DIST_PATH = path.resolve(__dirname, '..', 'dist');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -129,6 +131,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/evolution/find-messages') {
+      if (SERVER_WORKER_ENABLED && req.headers['x-autocrm-worker'] !== WORKER_TOKEN) {
+        sendJson(res, 200, { ok: true, mode: 'server-worker', records: [] });
+        return;
+      }
       await handleFindMessages(req, res);
       return;
     }
@@ -172,6 +178,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Evolution API bridge listening on http://${HOST}:${PORT}`);
+  if (SERVER_WORKER_ENABLED) startServerWorker();
 });
 
 // EVOLUTION_DRY_RUN só bloqueia envio de mensagens (sendText/sendMedia).
@@ -565,7 +572,7 @@ async function handleFindMessages(req, res) {
         record.text &&
         !record.fromMe &&
         canClaimMessage(record.id) &&
-        record.timestamp >= BRIDGE_STARTED_AT &&
+        record.timestamp >= BRIDGE_STARTED_AT - 15 * 60 &&
         latestInboundByJid.get(record.remoteJid) <= quietBefore
     );
 
@@ -798,6 +805,294 @@ function persistDeletedLeads() {
     Object.entries(deletedLeads).filter(([, deletedAt]) => Number(deletedAt) >= cutoff)
   );
   fs.writeFileSync(DELETED_LEADS_PATH, JSON.stringify(deletedLeads), 'utf8');
+}
+
+const workerInventory = [
+  {
+    id: 'stk-1',
+    keywords: ['onix'],
+    model: 'Chevrolet Onix LTZ 1.0 Turbo',
+    year: '2023/2024',
+    price: 'R$ 82.900',
+    mileage: '28.400 km',
+    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chevrolet_Onix_Activ_2017_%2849170997611%29.jpg?width=900',
+    highlights: ['Automático', 'Único dono', 'IPVA pago'],
+  },
+  {
+    id: 'stk-2',
+    keywords: ['hb20'],
+    model: 'Hyundai HB20 Comfort Plus',
+    year: '2022/2023',
+    price: 'R$ 71.500',
+    mileage: '35.100 km',
+    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Hyundai_HB20_06_2016_BSB_2593.jpg?width=900',
+    highlights: ['Baixa entrada', 'Garantia de motor', 'Laudo cautelar'],
+  },
+  {
+    id: 'stk-3',
+    keywords: ['argo'],
+    model: 'Fiat Argo Drive 1.0',
+    year: '2021/2022',
+    price: 'R$ 64.900',
+    mileage: '42.000 km',
+    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Fiat_Argo_test_drive_car_in_Punta_del_Este_%28front%29.jpg?width=900',
+    highlights: ['Econômico', 'Manual', 'Financia fácil'],
+  },
+  {
+    id: 'stk-4',
+    keywords: ['polo'],
+    model: 'Volkswagen Polo Track',
+    year: '2024/2024',
+    price: 'R$ 84.900',
+    mileage: '12.800 km',
+    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/2024_Volkswagen_Polo_Track_1.6_MSi_%28front%29.jpg?width=900',
+    highlights: ['Garantia de fábrica', 'Baixa km', 'Entrada facilitada'],
+  },
+  {
+    id: 'stk-5',
+    keywords: ['renegade'],
+    model: 'Jeep Renegade Sport',
+    year: '2021/2021',
+    price: 'R$ 92.000',
+    mileage: '51.300 km',
+    image: 'https://commons.wikimedia.org/wiki/Special:FilePath/Jeep_Renegade_%28MSP15%29.JPG?width=900',
+    highlights: ['Automático', 'SUV'],
+  },
+];
+
+let serverWorkerBusy = false;
+
+function startServerWorker() {
+  const run = () => processServerInbound().catch((error) => console.error('Server worker:', error.message));
+  setTimeout(run, 1_500);
+  setInterval(run, 4_000);
+  console.log('Server-side WhatsApp worker enabled');
+}
+
+async function processServerInbound() {
+  if (serverWorkerBusy) return;
+  serverWorkerBusy = true;
+  try {
+    const response = await fetch(`http://${HOST}:${PORT}/api/evolution/find-messages`, {
+      method: 'POST',
+      headers: internalHeaders({ 'x-autocrm-worker': WORKER_TOKEN }),
+      body: JSON.stringify({ offset: 50 }),
+    });
+    const payload = await response.json();
+    const records = Array.isArray(payload.records)
+      ? payload.records.filter((record) => !record.fromMe && !record.remoteJid.includes('@g.us'))
+      : [];
+    if (records.length === 0) return;
+
+    const groups = new Map();
+    for (const record of records.sort((a, b) => a.timestamp - b.timestamp)) {
+      const key = record.remoteJid.split('@')[0];
+      groups.set(key, [...(groups.get(key) || []), record]);
+    }
+
+    for (const group of groups.values()) await processServerGroup(group);
+  } finally {
+    serverWorkerBusy = false;
+  }
+}
+
+async function processServerGroup(records) {
+  const state = readWorkerState();
+  const first = records[0];
+  const last = records[records.length - 1];
+  const phone = normalizePhone(first.remoteJid.split('@')[0]);
+  const existingIndex = state.leads.findIndex((lead) => normalizePhone(lead.phone).slice(-8) === phone.slice(-8));
+  const existing = existingIndex >= 0 ? state.leads[existingIndex] : null;
+  const inboundMessages = records.map((record) => ({
+    id: record.id,
+    sender: 'lead',
+    text: record.text,
+    time: new Date(record.timestamp * 1000).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  }));
+  const knownIds = new Set(existing && Array.isArray(existing.messages) ? existing.messages.map((message) => message.id) : []);
+  const newMessages = inboundMessages.filter((message) => !knownIds.has(message.id));
+  if (newMessages.length === 0) {
+    await acknowledgeWorkerRecords(records.map((record) => record.id));
+    return;
+  }
+
+  let lead = existing
+    ? { ...existing, messages: [...existing.messages, ...newMessages], lastActivityAt: Date.now() }
+    : createServerLead(first, inboundMessages);
+  const combinedText = records.map((record) => record.text).join('\n');
+  const previousVehicle = lead.vehicle;
+  const stock = matchWorkerVehicle(combinedText) || matchWorkerVehicle(lead.vehicle);
+  if (stock && lead.vehicle !== stock.model) {
+    lead = {
+      ...lead,
+      vehicle: stock.model,
+      vehicleImage: stock.image,
+      budgetRange: stock.price,
+      intent: `Interessado no ${stock.model}`,
+      status: `IA atendendo — interesse identificado: ${stock.model}`,
+    };
+  }
+
+  if (lead.stage !== 'pre-atendimento') {
+    saveWorkerLead(state, lead, existingIndex);
+    await acknowledgeWorkerRecords(records.map((record) => record.id));
+    return;
+  }
+
+  const generated = existing
+    ? await generateWorkerReply(lead)
+    : { text: buildServerWelcome(lead), scheduledAt: null };
+  const matchedStock = matchWorkerVehicle(lead.vehicle);
+  const photoAlreadySent = Boolean(matchedStock) && lead.messages.some(
+    (message) => message.attachment && message.attachment.type === 'image' && message.attachment.label.includes(matchedStock.model)
+  );
+  const identifiedNow = Boolean(matchedStock) && previousVehicle !== matchedStock.model;
+  const sendPhoto = Boolean(matchedStock) && (workerAsksForPhoto(combinedText) || (identifiedNow && !photoAlreadySent));
+  const idempotencyKey = `server-inbound:${first.id}:${last.id}:${records.length}`;
+  const endpoint = sendPhoto ? 'send-media' : 'send-text';
+  const body = sendPhoto
+    ? {
+        number: phone,
+        media: matchedStock.image,
+        caption: generated.text,
+        mediatype: 'image',
+        mimetype: 'image/jpeg',
+        fileName: `${matchedStock.id}-veiculo.jpg`,
+        idempotencyKey,
+      }
+    : { number: phone, text: generated.text, idempotencyKey };
+  const sendResponse = await fetch(`http://${HOST}:${PORT}/api/evolution/${endpoint}`, {
+    method: 'POST',
+    headers: internalHeaders(),
+    body: JSON.stringify(body),
+  });
+  const sendResult = await sendResponse.json();
+  if (!sendResult.ok) throw new Error(sendResult.error || 'Falha no envio do worker');
+
+  if (!sendResult.duplicate) {
+    lead.messages.push({
+      id: `server-reply-${last.id}`,
+      sender: 'ai',
+      text: generated.text,
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      status: 'delivered',
+      ...(sendPhoto ? { attachment: { type: 'image', label: `📷 Foto — ${matchedStock.model}` } } : {}),
+    });
+    lead.lastActivityAt = Date.now();
+    if (generated.scheduledAt) {
+      lead.stage = 'agendado';
+      lead.scheduledAt = generated.scheduledAt;
+      lead.status = `Visita agendada pela IA para ${new Date(generated.scheduledAt).toLocaleString('pt-BR')}`;
+      lead.nextAction = 'Confirmar visita 1 dia antes (automático)';
+      lead.aiActions = [...(lead.aiActions || []), 'Agendou visita'];
+    }
+    saveWorkerLead(state, lead, existingIndex);
+  }
+  await acknowledgeWorkerRecords(records.map((record) => record.id));
+}
+
+function createServerLead(record, messages) {
+  const phone = normalizePhone(record.remoteJid.split('@')[0]);
+  const name = record.pushName || `WhatsApp ${phone.slice(-4)}`;
+  return {
+    id: `wa-${phone}`,
+    clientName: name,
+    vehicle: 'Interesse a identificar',
+    vehicleImage: workerInventory[0].image,
+    stage: 'pre-atendimento',
+    status: 'Novo lead entrou pelo WhatsApp — IA em atendimento',
+    budgetRange: 'A qualificar',
+    phone: `+${phone}`,
+    avatarInitials: name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+    priority: 'medium',
+    createdAt: new Date().toISOString(),
+    source: 'WhatsApp',
+    intent: 'A identificar',
+    temperature: 'morno',
+    nextAction: 'IA qualificando o lead automaticamente',
+    aiSummary: 'Lead novo recebido pelo WhatsApp. IA iniciou a qualificação.',
+    messages,
+    lastActivityAt: Date.now(),
+  };
+}
+
+function buildServerWelcome(lead) {
+  const firstName = lead.clientName.split(' ')[0];
+  if (lead.vehicle !== 'Interesse a identificar') {
+    return `Oi, ${firstName}! Sou a assistente virtual da loja. Temos o ${lead.vehicle} no estoque. Posso ajudar com preço, financiamento, troca ou agendar uma visita?`;
+  }
+  return `Oi, ${firstName}! Sou a assistente virtual da loja. Como posso te ajudar? Você procura algum modelo ou faixa de preço específica?`;
+}
+
+async function generateWorkerReply(lead) {
+  const stock = matchWorkerVehicle(lead.vehicle);
+  const response = await fetch(`http://${HOST}:${PORT}/api/ai/generate`, {
+    method: 'POST',
+    headers: internalHeaders(),
+    body: JSON.stringify({
+      instruction: 'Leia as últimas mensagens como uma conversa contínua e responda uma única vez. Não repita saudação nem apresentação. Se forem frases fragmentadas, junte o sentido. Se a conversa for casual, responda em uma frase e redirecione com leveza. Use somente os dados oficiais do veículo. Ofereça visita quando houver interesse e detecte confirmação explícita de dia e horário.',
+      fallback: 'Entendi. Me conta qual carro você procura e eu te ajudo por aqui.',
+      detectSchedule: true,
+      lead: {
+        clientName: lead.clientName,
+        vehicle: lead.vehicle,
+        vehicleSheet: stock
+          ? `Modelo: ${stock.model} | Ano: ${stock.year} | Preço: ${stock.price} | Km: ${stock.mileage} | Destaques: ${stock.highlights.join(', ')}`
+          : undefined,
+        budgetRange: lead.budgetRange,
+        intent: lead.intent,
+        messages: lead.messages.slice(-8),
+      },
+    }),
+  });
+  const result = await response.json();
+  return { text: result.text || 'Como posso te ajudar com o veículo?', scheduledAt: result.scheduledAt || null };
+}
+
+function readWorkerState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    return {
+      leads: Array.isArray(state.leads) ? state.leads : [],
+      rules: Array.isArray(state.rules) ? state.rules : [],
+    };
+  } catch {
+    return { leads: [], rules: [] };
+  }
+}
+
+function saveWorkerLead(state, lead, existingIndex) {
+  if (existingIndex >= 0) state.leads[existingIndex] = lead;
+  else state.leads.push(lead);
+  fs.writeFileSync(DB_PATH, JSON.stringify({ ...state, savedAt: new Date().toISOString() }, null, 2), 'utf8');
+}
+
+async function acknowledgeWorkerRecords(ids) {
+  await fetch(`http://${HOST}:${PORT}/api/evolution/ack-message`, {
+    method: 'POST',
+    headers: internalHeaders(),
+    body: JSON.stringify({ ids }),
+  });
+}
+
+function internalHeaders(extra = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extra };
+  if (APP_USERNAME && APP_PASSWORD) {
+    headers.Authorization = `Basic ${Buffer.from(`${APP_USERNAME}:${APP_PASSWORD}`).toString('base64')}`;
+  }
+  return headers;
+}
+
+function matchWorkerVehicle(text) {
+  const normalized = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return workerInventory.find((vehicle) => vehicle.keywords.some((keyword) => normalized.includes(keyword))) || null;
+}
+
+function workerAsksForPhoto(text) {
+  return /\b(foto|fotos|imagem|imagens|me mostra|manda a?s? foto|ver o carro|quero ver)\b/i.test(text);
 }
 
 function readRequestJson(req) {

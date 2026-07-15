@@ -12,6 +12,7 @@ CRM demonstrativo para lojas de seminovos, com pipeline Kanban, atendimento auto
 - Agendamento de visita e transferência para atendimento humano.
 - Painel administrativo para QR Code, instância e estoque.
 - Exclusão persistente de lead para reiniciar testes.
+- Worker opcional no servidor para atender mesmo com o painel fechado.
 
 ## Desenvolvimento local
 
@@ -51,4 +52,4 @@ Os arquivos em `deploy/` incluem uma unidade systemd isolada e um bloco Caddy. A
 
 ## Observação da demonstração
 
-O processamento automático atual é iniciado pela interface do CRM. Durante a apresentação, mantenha o painel aberto em uma aba. A migração desse motor para um worker independente é o próximo passo para operação contínua sem navegador.
+Em produção, configure `SERVER_WORKER_ENABLED=true` para processar mensagens no servidor. O painel sincroniza o estado automaticamente e não precisa permanecer aberto para a IA responder.
