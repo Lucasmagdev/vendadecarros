@@ -45,6 +45,10 @@ A aplicação completa fica disponível na porta definida por `API_PORT`.
 
 Os dados operacionais ficam no volume `autocrm_data`. O arquivo `.env` e os dados de leads não são versionados.
 
+## Deploy com systemd e Caddy
+
+Os arquivos em `deploy/` incluem uma unidade systemd isolada e um bloco Caddy. A aplicação usa o usuário `autocrm`, lê segredos de `/etc/autocrm/autocrm.env`, grava somente em `/var/lib/autocrm` e escuta em `127.0.0.1:3100`.
+
 ## Observação da demonstração
 
 O processamento automático atual é iniciado pela interface do CRM. Durante a apresentação, mantenha o painel aberto em uma aba. A migração desse motor para um worker independente é o próximo passo para operação contínua sem navegador.

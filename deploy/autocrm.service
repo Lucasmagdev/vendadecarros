@@ -1,0 +1,23 @@
+[Unit]
+Description=AutoCRM IA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autocrm
+Group=autocrm
+WorkingDirectory=/opt/autocrm-ia
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/autocrm/autocrm.env
+ExecStart=/usr/bin/node /opt/autocrm-ia/server/evolution-api.cjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/autocrm
+
+[Install]
+WantedBy=multi-user.target

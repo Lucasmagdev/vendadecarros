@@ -5,6 +5,7 @@ const path = require('path');
 loadDotEnv();
 
 const PORT = Number(process.env.API_PORT || 8787);
+const HOST = process.env.HOST || '127.0.0.1';
 const EVOLUTION_API_URL = trimTrailingSlash(process.env.EVOLUTION_API_URL || '');
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || '';
@@ -169,8 +170,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Evolution API bridge listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Evolution API bridge listening on http://${HOST}:${PORT}`);
 });
 
 // EVOLUTION_DRY_RUN só bloqueia envio de mensagens (sendText/sendMedia).

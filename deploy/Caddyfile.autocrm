@@ -1,0 +1,4 @@
+autocrm.129-212-189-135.sslip.io {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:3100
+}
