@@ -40,7 +40,8 @@ A aplicação completa fica disponível na porta definida por `API_PORT`.
 
 1. Copie `.env.example` para `.env` e configure Evolution, OpenAI e credenciais do painel.
 2. Execute `docker compose up -d --build`.
-3. Consulte a saúde em `/api/health`.
+3. A porta pública padrão é `3100` e pode ser alterada por `APP_PORT`.
+4. Consulte a saúde em `/api/health`.
 
 Os dados operacionais ficam no volume `autocrm_data`. O arquivo `.env` e os dados de leads não são versionados.
 
